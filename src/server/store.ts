@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import type { PermissionRule } from "../shared/permissions.ts";
 import type { Agent, Conversation, LogEntry, OfficeSnapshot, PermissionRequest, ServerEvent } from "../shared/types.ts";
 
 const MAX_LOG_PER_AGENT = 500;
@@ -13,6 +14,9 @@ export class OfficeStore extends EventEmitter<{ event: [ServerEvent] }> {
   private logs = new Map<string, LogEntry[]>();
   private snapshotTimer: NodeJS.Timeout | undefined;
   readonly conversations: ConversationTracker;
+  /** Lets standing rules answer a request before anyone walks to the boss. Returns true if handled. */
+  screenPermission?: (p: PermissionRequest) => boolean;
+  rulesProvider?: () => PermissionRule[];
 
   constructor(
     readonly sourceName: string,
@@ -29,6 +33,7 @@ export class OfficeStore extends EventEmitter<{ event: [ServerEvent] }> {
       agents: [...this.agents.values()].map((a) => (waiting.has(a.id) ? { ...a, status: "needs_review" } : a)),
       conversations: this.conversations.active(),
       permissions,
+      rules: this.rulesProvider?.() ?? [],
       source: this.sourceName,
     };
   }
@@ -62,6 +67,8 @@ export class OfficeStore extends EventEmitter<{ event: [ServerEvent] }> {
   }
 
   addPermission(p: PermissionRequest): void {
+    if (this.permissions.has(p.id)) return;
+    if (this.screenPermission?.(p)) return;
     this.permissions.set(p.id, p);
     this.changed();
   }

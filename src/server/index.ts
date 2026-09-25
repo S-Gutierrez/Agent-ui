@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.ts";
 import { MemoryStore } from "./memory.ts";
+import { PermissionDesk, RuleStore } from "./permissions.ts";
 import { MockSource } from "./sources/mock.ts";
 import { OpencodeSource } from "./sources/opencode.ts";
 import type { AgentSource } from "./sources/source.ts";
@@ -33,9 +34,16 @@ const source: AgentSource = useMock
 const memoryDir = path.resolve(env.OFFICE_MEMORY_DIR ?? (useMock ? path.join(root, "examples/memory") : path.join(root, "memory")));
 const store = new OfficeStore(source.name, Number(env.OFFICE_CONVERSATION_TTL_S ?? 60) * 1000);
 
+// The boss's standing permission rules. Simulation mode keeps them in memory only.
+const rulesFile = useMock ? undefined : path.resolve(env.OFFICE_RULES_FILE ?? path.join(root, ".office/permission-rules.json"));
+const rules = new RuleStore(rulesFile);
+await rules.load();
+const desk = new PermissionDesk(store, source, rules);
+
 const app = createApp({
   store,
   source,
+  desk,
   memory: new MemoryStore(memoryDir),
   staticDir: env.NODE_ENV === "production" ? path.join(root, "dist") : undefined,
   allowedHosts: env.OFFICE_ALLOWED_HOSTS?.split(",").map((s) => s.trim().toLowerCase()),
@@ -51,11 +59,13 @@ await source.start(store);
 const server = createServer((req, res) => void app(req, res));
 server.listen(port, host, () => {
   console.log(`Agent Office API on http://${host}:${port}  (source: ${source.name}, memory: ${memoryDir})`);
+  console.log(`Permission rules: ${rulesFile ?? "in memory (simulation)"} - ${rules.list().length} loaded`);
   if (env.NODE_ENV === "production") console.log(`Open http://${host === "127.0.0.1" ? "localhost" : host}:${port}`);
 });
 
 const shutdown = async () => {
   await source.stop();
+  await rules.flush();
   store.dispose();
   server.close();
   process.exit(0);

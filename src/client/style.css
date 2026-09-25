@@ -384,3 +384,127 @@ button:disabled {
   margin-left: 10px;
   font-family: var(--mono);
 }
+
+/* ---------------------------------------------- permission decisions */
+
+.perm {
+  flex-direction: column;
+  align-items: stretch;
+}
+.perm-kind {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: rgba(255, 202, 40, 0.18);
+  color: var(--yellow);
+  font-weight: bold;
+}
+.pat {
+  font-family: var(--mono);
+  background: #0d1014;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 4px;
+  color: var(--text);
+}
+.pat.broad {
+  border-color: var(--yellow);
+  color: #ffe08a;
+}
+.warn {
+  color: var(--yellow);
+}
+.perm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.perm-btn {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.perm-btn.once,
+.perm-btn.always {
+  border-color: #3d6b3d;
+  color: #b9e6a5;
+}
+.perm-btn.restrict {
+  border-color: #6b5a2a;
+  color: #ffe08a;
+}
+.perm-btn.no,
+.perm-btn.never {
+  border-color: #7a3434;
+  color: #f4a4a4;
+}
+.perm-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px;
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+  background: #101317;
+}
+.perm-editor-title {
+  color: var(--text);
+}
+.perm-quick {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.pat-row {
+  display: flex;
+  gap: 5px;
+}
+.pat-input,
+.rule-perm,
+.rule-action,
+.perm-msg {
+  font: inherit;
+  font-family: var(--mono);
+  color: var(--text);
+  background: #0d1014;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+.pat-input {
+  flex: 1;
+  min-width: 120px;
+}
+.pat-input.broad {
+  border-color: var(--yellow);
+}
+.perm-msg {
+  min-height: 52px;
+  resize: vertical;
+}
+.mini {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 7px;
+}
+.mini.danger {
+  border-color: #7a3434;
+}
+
+.rules-intro {
+  padding: 8px 10px 0;
+}
+.rule-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.rule-perm {
+  width: 80px;
+}
+.rule-add {
+  border-top: 1px solid var(--line);
+  border-bottom: none;
+}

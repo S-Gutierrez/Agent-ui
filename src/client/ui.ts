@@ -4,6 +4,7 @@
 
 import type { Agent, LogEntry, OfficeSnapshot, PermissionRequest } from "../shared/types.ts";
 import { api } from "./api.ts";
+import { permissionCard } from "./permissions-ui.ts";
 
 type Tab = "reasoning" | "chat" | "memory";
 
@@ -145,7 +146,7 @@ export class TerminalWindow {
     const mine = all.filter((p) => p.agentId === this.agent.id);
     if (mine.map((p) => p.id).join() === this.permissions.map((p) => p.id).join()) return;
     this.permissions = mine;
-    this.banner.replaceChildren(...mine.map((p) => permissionRow(p)));
+    this.banner.replaceChildren(...mine.map((p) => permissionCard(p)));
     this.banner.hidden = mine.length === 0;
   }
 
@@ -262,35 +263,6 @@ export class TerminalWindow {
   }
 }
 
-function permissionRow(p: PermissionRequest): HTMLElement {
-  const row = el("div", "perm");
-  row.append(el("span", "perm-title", p.kind === "question" ? `? ${p.title}` : `! ${p.title}`));
-  if (p.kind === "question") {
-    row.append(el("span", "perm-hint", "answer it in the opencode TUI"));
-    return row;
-  }
-  const actions: Array<[string, "once" | "always" | "reject"]> = [
-    ["allow once", "once"],
-    ["always", "always"],
-    ["deny", "reject"],
-  ];
-  for (const [label, reply] of actions) {
-    const b = el("button", `perm-btn ${reply}`, label);
-    b.type = "button";
-    b.onclick = async () => {
-      row.querySelectorAll("button").forEach((x) => (x.disabled = true));
-      try {
-        await api.reply(p.id, reply);
-      } catch (err) {
-        row.append(el("span", "perm-hint", `! ${(err as Error).message}`));
-        row.querySelectorAll("button").forEach((x) => (x.disabled = false));
-      }
-    };
-    row.append(b);
-  }
-  return row;
-}
-
 export class Inbox {
   readonly root = el("div", "inbox");
   private readonly list = el("div", "inbox-list");
@@ -311,18 +283,31 @@ export class Inbox {
     this.root.hidden = !this.open;
   }
 
+  private readonly cards = new Map<string, HTMLElement>();
+  private readonly empty = el("div", "term-line sys", "Nobody is waiting for you.");
+
+  /** Keeps existing cards (and any pattern being edited) across snapshots. */
   update(snapshot: OfficeSnapshot): void {
     const names = new Map(snapshot.agents.map((a) => [a.id, a.name]));
-    const rows = snapshot.permissions.map((p) => {
+    const live = new Set(snapshot.permissions.map((p) => p.id));
+    for (const [id, card] of this.cards) {
+      if (!live.has(id)) {
+        card.remove();
+        this.cards.delete(id);
+      }
+    }
+    for (const p of snapshot.permissions) {
+      if (this.cards.has(p.id)) continue;
       const wrap = el("div", "inbox-item");
       const who = el("button", "inbox-agent", names.get(p.agentId) ?? p.agentId);
       who.type = "button";
       who.onclick = () => this.onOpenAgent(p.agentId);
-      wrap.append(who, permissionRow(p));
-      return wrap;
-    });
-    if (!rows.length) rows.push(el("div", "term-line sys", "Nobody is waiting for you."));
-    this.list.replaceChildren(...rows);
+      wrap.append(who, permissionCard(p));
+      this.cards.set(p.id, wrap);
+      this.list.append(wrap);
+    }
+    if (this.cards.size) this.empty.remove();
+    else this.list.replaceChildren(this.empty);
   }
 }
 

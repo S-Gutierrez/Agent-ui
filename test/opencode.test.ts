@@ -125,13 +125,17 @@ describe("OpencodeSource", () => {
   });
 
   it("puts agents with a permission request in front of the boss, and replies via the API", async () => {
-    fake.emit("permission.asked", { id: "per_1", sessionID: "ses_a", permission: "bash", patterns: ["rm -rf dist"], metadata: {}, always: [] });
+    fake.emit("permission.asked", { id: "per_1", sessionID: "ses_a", permission: "bash", patterns: ["rm -rf dist"], metadata: {}, always: ["rm *"] });
     await until(() => store.snapshot().agents.find((a) => a.id === "ses_a")!.status === "needs_review");
-    expect(store.snapshot().permissions[0]!.title).toBe("bash: rm -rf dist");
+    expect(store.snapshot().permissions[0]).toMatchObject({ title: "bash: rm -rf dist", permission: "bash", patterns: ["rm -rf dist"], always: ["rm *"] });
 
     await source.replyPermission("per_1", "once");
     const req = fake.requests.find((r) => r.url === "/permission/per_1/reply")!;
     expect(JSON.parse(req.body)).toEqual({ reply: "once" });
+
+    await source.replyPermission("per_1", "reject", "narrower please");
+    const rej = fake.requests.filter((r) => r.url === "/permission/per_1/reply").at(-1)!;
+    expect(JSON.parse(rej.body)).toEqual({ reply: "reject", message: "narrower please" });
 
     fake.emit("permission.replied", { sessionID: "ses_a", requestID: "per_1", reply: "once" });
     await until(() => store.snapshot().permissions.length === 0);

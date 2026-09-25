@@ -96,12 +96,12 @@ export class OpencodeSource implements AgentSource {
     });
   }
 
-  async replyPermission(permissionId: string, reply: PermissionReply): Promise<void> {
+  async replyPermission(permissionId: string, reply: PermissionReply, message?: string): Promise<void> {
     const base = this.permissionOwner.get(permissionId);
     if (!base) throw new Error("unknown permission request");
     await this.call(base, `/permission/${encodeURIComponent(permissionId)}/reply`, {
       method: "POST",
-      body: JSON.stringify({ reply }),
+      body: JSON.stringify(message ? { reply, message } : { reply }),
     });
   }
 
@@ -244,13 +244,18 @@ export class OpencodeSource implements AgentSource {
   private onPermissionAsked(base: string, p: Record<string, any>): void {
     if (!p.id || !p.sessionID || !this.store.getAgent(p.sessionID)) return;
     this.permissionOwner.set(p.id, base);
-    const patterns = Array.isArray(p.patterns) ? p.patterns.join(", ") : "";
+    const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+    const patterns = strings(p.patterns);
+    const permission = String(p.permission ?? p.type ?? "permission");
     this.store.addPermission({
       id: p.id,
       agentId: p.sessionID,
-      title: [p.permission ?? p.title ?? "permission", patterns].filter(Boolean).join(": "),
+      title: [permission, patterns.join(", ") || p.title].filter(Boolean).join(": "),
       at: Date.now(),
       kind: "permission",
+      permission,
+      patterns,
+      always: strings(p.always),
     });
   }
 

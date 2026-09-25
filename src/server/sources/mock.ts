@@ -36,6 +36,15 @@ const PEER_LINES = [
   "Which fixture should I use for the integration tests?",
 ];
 
+/** Simulated requests: what is asked, the simplified "always" pattern, and a narrower retry. */
+const REQUESTS = [
+  { permission: "bash", patterns: ["npm publish --dry-run"], always: ["npm *"], narrower: ["npm publish --dry-run"] },
+  { permission: "bash", patterns: ["rm -rf dist/"], always: ["rm *"], narrower: ["rm -rf dist/"] },
+  { permission: "bash", patterns: ["git push origin feature/login"], always: ["git *"], narrower: ["git push origin feature/*"] },
+  { permission: "edit", patterns: [".github/workflows/ci.yml"], always: ["*"], narrower: [".github/workflows/ci.yml"] },
+  { permission: "webfetch", patterns: ["https://api.example.com/v1/users"], always: ["*"], narrower: ["https://api.example.com/v1/*"] },
+];
+
 const pick = <T>(xs: readonly T[]): T => xs[Math.floor(Math.random() * xs.length)]!;
 
 export class MockSource implements AgentSource {
@@ -43,7 +52,7 @@ export class MockSource implements AgentSource {
   private store!: OfficeStore;
   private timers: NodeJS.Timeout[] = [];
   private seq = 0;
-  private pendingPermission = new Map<string, string>();
+  private pendingPermission = new Map<string, { agentId: string; req: (typeof REQUESTS)[number]; retried: boolean }>();
 
   async start(store: OfficeStore): Promise<void> {
     this.store = store;
@@ -68,13 +77,24 @@ export class MockSource implements AgentSource {
     );
   }
 
-  async replyPermission(permissionId: string, reply: PermissionReply): Promise<void> {
-    const agentId = this.pendingPermission.get(permissionId);
-    if (!agentId) throw new Error("unknown permission request");
+  async replyPermission(permissionId: string, reply: PermissionReply, message?: string): Promise<void> {
+    const pending = this.pendingPermission.get(permissionId);
+    if (!pending) throw new Error("unknown permission request");
+    const { agentId, req, retried } = pending;
     this.pendingPermission.delete(permissionId);
     this.store.removePermission(permissionId);
-    this.log(agentId, "system", `Boss replied "${reply}" to the permission request.`);
-    this.store.patchAgent(agentId, { status: reply === "reject" ? "idle" : "working" });
+    this.store.patchAgent(agentId, { status: "working" });
+    if (reply === "once") {
+      this.log(agentId, "tool", `${req.permission} ${req.patterns.join(" ")} [completed]`);
+      return;
+    }
+    if (message) this.log(agentId, "reasoning", `Permission rejected: "${message}"`);
+    if (!retried && message && /narrower|outside that scope/i.test(message)) {
+      // Behave like a well-mannered agent: ask again with a tighter request.
+      this.later(4_000, () => this.request(agentId, { ...req, patterns: req.narrower, always: req.narrower }, true));
+    } else {
+      this.log(agentId, "reasoning", "Okay, I'll find another way to do this without that permission.");
+    }
   }
 
   async stop(): Promise<void> {
@@ -90,7 +110,8 @@ export class MockSource implements AgentSource {
   }
 
   private shuffleStatus(): void {
-    const candidates = this.store.listAgents().filter((a) => ![...this.pendingPermission.values()].includes(a.id));
+    const waiting = new Set([...this.pendingPermission.values()].map((p) => p.agentId));
+    const candidates = this.store.listAgents().filter((a) => !waiting.has(a.id));
     const a = candidates.length ? pick(candidates) : undefined;
     if (!a) return;
     const next: AgentStatus = a.status === "working" ? "idle" : "working";
@@ -128,12 +149,15 @@ export class MockSource implements AgentSource {
   private askPermission(): void {
     const candidates = this.store.listAgents().filter((a) => a.status === "working");
     if (!candidates.length || this.pendingPermission.size >= 2) return;
-    const a = pick(candidates);
+    this.request(pick(candidates).id, pick(REQUESTS), false);
+  }
+
+  private request(agentId: string, req: (typeof REQUESTS)[number], retried: boolean): void {
     const id = `perm-${++this.seq}`;
-    const title = pick(["Run `rm -rf dist/`", "Edit .github/workflows/ci.yml", "Run `npm publish --dry-run`", "Access network: api.example.com"]);
-    this.pendingPermission.set(id, a.id);
-    this.store.addPermission({ id, agentId: a.id, title, at: Date.now() });
-    this.log(a.id, "system", `Waiting for the boss: ${title}`);
+    const title = `${req.permission}: ${req.patterns.join(", ")}`;
+    this.pendingPermission.set(id, { agentId, req, retried });
+    this.log(agentId, "system", `${retried ? "Asking again, narrower" : "Asking the boss"}: ${title}`);
+    this.store.addPermission({ id, agentId, title, at: Date.now(), kind: "permission", permission: req.permission, patterns: req.patterns, always: req.always });
   }
 
   private log(agentId: string, kind: Parameters<OfficeStore["log"]>[0]["kind"], text: string, peer?: string): void {

@@ -5,3 +5,5 @@ dist/
 # Real agent memories may contain personal data - keep them out of git by default.
 memory/*.md
 !memory/README.md
+# Local state (permission rules)
+.office/

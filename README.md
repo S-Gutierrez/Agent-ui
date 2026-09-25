@@ -21,8 +21,23 @@ Click an agent to open its in-game **terminal window**, which has three tabs:
 - **memory**: read and edit the agent's personal `memory/<agent>.md`
 
 Permission requests show up in that agent's window and in the **inbox** (the
-button in the top bar, or click the boss desk). You can answer each one with
-allow once, always or deny.
+button in the top bar, or click the boss desk). You answer each one with one of
+five choices:
+
+| Choice | Effect |
+| --- | --- |
+| **approve this time** | Allows this one request. |
+| **approve always...** | Saves an allow rule. You edit the pattern first, for example narrowing opencode's suggested `npm *` to `npm test*`. |
+| **restrict & retry...** | Rejects the request and asks the agent to retry with a narrower one. You can add a hint. |
+| **no** | Rejects this one request. |
+| **never...** | Saves a deny rule, again with an editable pattern. |
+
+The **rules** panel lists every standing rule; you can edit or delete any of
+them. The office answers opencode only with "once" or "reject". Standing
+approvals therefore live in your editable rule list, never in opencode's own
+"always" list, which you can't edit or revoke from outside.
+
+**New here? Follow [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) step by step.**
 
 ## Quick start
 
@@ -99,6 +114,7 @@ personal data about people in it.
 | `OFFICE_SESSION_MAX_AGE_H` | `12` | Ignore sessions not updated in this many hours (at startup) |
 | `OFFICE_CONVERSATION_TTL_S` | `60` | Silence after which a conversation ends |
 | `OPENCODE_AUTHORIZATION` | | `Authorization` header value sent to opencode, if your server needs one |
+| `OFFICE_RULES_FILE` | `./.office/permission-rules.json` | Where the boss's permission rules are saved (simulation keeps them in memory) |
 
 ## Architecture
 
@@ -135,10 +151,16 @@ it is locked down by default:
 - Strict **CSP**, `X-Frame-Options: DENY`, `nosniff`, `no-referrer`.
 - Request bodies are size-limited. Memory files are capped at 256 KB, written atomically, and their names are slugged, so path traversal is impossible. Static file serving is confined to `dist/`.
 - The UI renders all agent output with `textContent`, never `innerHTML`, so agent output cannot inject HTML or scripts (XSS).
-- **Peers plugin caveat:** by default `opencode-plugin-peers` auto-approves
-  permissions for turns triggered by another agent (`peerPermissions: "allow"`).
-  Those requests then never reach the boss desk. If you want every risky action
-  to go through you, set `peerPermissions` to `"ask"` in the plugin config.
+- **Always ask.** [`examples/opencode.json`](examples/opencode.json) sets
+  opencode's `"permission": "ask"`, so every tool action needs approval. It
+  also sets the peers plugin's `peerPermissions` to `"ask"`. The plugin's
+  default, `"allow"`, auto-approves actions triggered by another agent, so
+  they would never reach the boss desk. Never run opencode with `--auto`.
+- **Standing rules** use opencode's wildcard syntax: `*` matches anything and
+  `?` matches one character. Deny wins over allow, and an allow rule must cover
+  every pattern in a request. Patterns that grant a lot (`*`, `git *`, `rm *`)
+  are flagged as broad in the UI. Rules are stored in a git-ignored file with
+  `0600` permissions.
 - **Supply chain:** there are zero runtime npm dependencies. Dev dependencies are limited to TypeScript, Vite, Vitest, tsx and concurrently.
 
 ### About the Habbo inspiration
@@ -166,8 +188,10 @@ rooms. Everything here is original.
   talking to an AI agent whose replies are machine-generated. Simulation mode
   is clearly labelled as fake. The reasoning tab adds transparency: you can see
   what each agent is doing and why.
-- **Human oversight (AI Act Art. 14).** Permission requests are routed to a
-  human (the boss desk), who can approve once, always, or deny.
+- **Human oversight (AI Act Art. 14).** Every permission request is routed to
+  a human at the boss desk, unless it matches a standing rule that the human
+  created and can inspect, edit or revoke at any time. Auto-answered requests
+  are logged in the agent's terminal.
 - Opencode itself and the model providers it calls act as separate processors
   or controllers. Review their terms and data-processing agreements for your
   deployment.

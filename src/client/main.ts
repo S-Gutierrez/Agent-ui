@@ -20,6 +20,7 @@ import {
 } from "./draw.ts";
 import { Camera } from "./iso.ts";
 import { BOSS_LOOK, lookFor } from "./look.ts";
+import { RulesPanel } from "./permissions-ui.ts";
 import { Inbox, Logs, TerminalWindow } from "./ui.ts";
 import { World, type Avatar } from "./world.ts";
 
@@ -52,8 +53,16 @@ const BUBBLE_MS = 6_000;
 /* ------------------------------------------------------------ inbox & windows */
 
 const inbox = new Inbox((id) => openWindow(id, "chat"));
-hud.windows.append(inbox.root);
-hud.inboxBtn.onclick = () => inbox.toggle();
+const rulesPanel = new RulesPanel();
+hud.windows.append(inbox.root, rulesPanel.root);
+hud.inboxBtn.onclick = () => {
+  rulesPanel.toggle(false);
+  inbox.toggle();
+};
+document.querySelector<HTMLButtonElement>("#rules-btn")!.onclick = () => {
+  inbox.toggle(false);
+  rulesPanel.toggle();
+};
 hud.resetView.onclick = () => {
   manualCamera = false;
   fitCamera();
@@ -114,6 +123,7 @@ function onSnapshot(s: OfficeSnapshot): void {
     }
   }
   inbox.update(s);
+  rulesPanel.update(s.rules);
   hud.source.textContent = s.source;
   hud.banner.hidden = s.source !== "simulation";
   const n = s.permissions.length;

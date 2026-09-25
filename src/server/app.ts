@@ -3,13 +3,16 @@ import { stat } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import type { MemoryStore } from "./memory.ts";
-import type { AgentSource, PermissionReply } from "./sources/source.ts";
+import { DECISIONS, type Decision } from "../shared/permissions.ts";
+import { type PermissionDesk, validatePatterns, ValidationError } from "./permissions.ts";
+import type { AgentSource } from "./sources/source.ts";
 import type { OfficeStore } from "./store.ts";
 
 export interface AppOptions {
   store: OfficeStore;
   source: AgentSource;
   memory: MemoryStore;
+  desk: PermissionDesk;
   /** Serve the built client from here (production). */
   staticDir?: string;
   /** Extra Host header values to accept besides localhost (e.g. behind a reverse proxy). */
@@ -19,6 +22,16 @@ export interface AppOptions {
 }
 
 const MAX_BODY = 300 * 1024;
+
+/** Turn validation failures from the permission desk into 400s. */
+async function guard<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof ValidationError) throw new HttpError(400, err.message);
+    throw err;
+  }
+}
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -71,7 +84,7 @@ export function createApp(opts: AppOptions) {
 }
 
 async function api(req: IncomingMessage, res: ServerResponse, url: URL, opts: AppOptions): Promise<void> {
-  const { store, source, memory } = opts;
+  const { store, source, memory, desk } = opts;
   const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent); // ["api", ...]
   const route = `${req.method} /${parts.slice(1).map((p, i) => (i === 1 ? ":id" : p)).join("/")}`;
   const id = parts[2] ?? "";
@@ -109,11 +122,30 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, opts: Ap
     case "POST /permissions/:id": {
       if (!store.getPermission(id)) throw new HttpError(404, "no such permission request");
       const body = await readJson(req);
-      const reply = body.reply as PermissionReply;
-      if (!["once", "always", "reject"].includes(reply)) throw new HttpError(400, "reply must be once|always|reject");
-      await source.replyPermission(id, reply);
+      const decision = body.decision as Decision;
+      if (!DECISIONS.includes(decision)) throw new HttpError(400, `decision must be one of ${DECISIONS.join("|")}`);
+      if (body.message !== undefined && typeof body.message !== "string") throw new HttpError(400, "message must be a string");
+      await guard(() => desk.decide(id, decision, { patterns: validatePatterns(body.patterns), message: body.message as string | undefined }));
       return sendJson(res, 202, { ok: true });
     }
+    case "GET /rules":
+      return sendJson(res, 200, desk.rules.list());
+    case "POST /rules": {
+      const body = await readJson(req);
+      const rule = await guard(async () => desk.rules.add(body as never));
+      desk.applyToPending();
+      return sendJson(res, 201, rule);
+    }
+    case "PUT /rules/:id": {
+      const body = await readJson(req);
+      const rule = await guard(async () => desk.rules.update(id, body as never));
+      desk.applyToPending();
+      return sendJson(res, 200, rule);
+    }
+    case "DELETE /rules/:id":
+      if (!desk.rules.remove(id)) throw new HttpError(404, "no such rule");
+      store.changed();
+      return sendJson(res, 200, { ok: true });
   }
   throw new HttpError(404, "not found");
 }

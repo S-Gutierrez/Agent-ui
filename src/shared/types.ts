@@ -1,6 +1,8 @@
 // Normalised model shared by server and client. Every agent backend (mock,
 // opencode, ...) is translated into these shapes by a source adapter.
 
+import type { PermissionRule } from "./permissions.ts";
+
 export type AgentStatus = "working" | "idle" | "needs_review";
 
 export interface Agent {
@@ -47,12 +49,19 @@ export interface PermissionRequest {
   at: number;
   /** "question" requests are answered in the agent's own chat, not with allow/deny. */
   kind?: "permission" | "question";
+  /** opencode permission key, e.g. "bash", "edit", "webfetch". */
+  permission?: string;
+  /** What is being asked for right now, e.g. ["npm publish --dry-run"]. */
+  patterns?: string[];
+  /** The simplified pattern(s) an "always" approval would grant, e.g. ["npm publish *"]. */
+  always?: string[];
 }
 
 export interface OfficeSnapshot {
   agents: Agent[];
   conversations: Conversation[];
   permissions: PermissionRequest[];
+  rules: PermissionRule[];
   source: string;
 }
 

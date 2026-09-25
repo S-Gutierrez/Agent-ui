@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": "ask",
+  "plugin": [
+    [
+      "opencode-plugin-peers",
+      {
+        "name": "backend",
+        "peerPermissions": "ask",
+        "inboundPolicy": "accept"
+      }
+    ]
+  ]
+}

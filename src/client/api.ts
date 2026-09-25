@@ -1,3 +1,4 @@
+import type { Decision, PermissionRule, RuleAction } from "../shared/permissions.ts";
 import type { LogEntry, OfficeSnapshot, ServerEvent } from "../shared/types.ts";
 
 const token = new URLSearchParams(location.search).get("token") ?? undefined;
@@ -25,7 +26,12 @@ export const api = {
   send: (id: string, text: string) => request("POST", `/api/agents/${enc(id)}/message`, { text }),
   memory: (id: string) => request<{ content: string; exists: boolean; file: string }>("GET", `/api/agents/${enc(id)}/memory`),
   saveMemory: (id: string, content: string) => request("PUT", `/api/agents/${enc(id)}/memory`, { content }),
-  reply: (permissionId: string, reply: "once" | "always" | "reject") => request("POST", `/api/permissions/${enc(permissionId)}`, { reply }),
+  decide: (permissionId: string, decision: Decision, opts: { patterns?: string[]; message?: string } = {}) =>
+    request("POST", `/api/permissions/${enc(permissionId)}`, { decision, ...opts }),
+  addRule: (rule: { permission: string; pattern: string; action: RuleAction }) => request<PermissionRule>("POST", "/api/rules", rule),
+  updateRule: (id: string, patch: Partial<Pick<PermissionRule, "permission" | "pattern" | "action">>) =>
+    request<PermissionRule>("PUT", `/api/rules/${enc(id)}`, patch),
+  deleteRule: (id: string) => request("DELETE", `/api/rules/${enc(id)}`, {}),
 };
 
 export function subscribe(onEvent: (e: ServerEvent) => void, onStatus: (connected: boolean) => void): () => void {
