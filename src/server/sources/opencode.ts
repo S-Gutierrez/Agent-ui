@@ -1,8 +1,9 @@
-// Connects to one or more `opencode serve` HTTP servers and translates their
-// sessions and event stream into the office model.
+// Connects to opencode HTTP servers and translates their sessions and event
+// stream into the office model. Servers come from OPENCODE_URLS and/or are
+// discovered automatically from the opencode-plugin-peers registry.
 //
 // Mapping:
-//   * each top-level opencode session       -> one agent
+//   * each top-level opencode session       -> one agent (named after its opencode agent)
 //   * session.status busy|retry / idle      -> working / idle
 //   * permission.asked / question.asked     -> needs_review (walks to the boss)
 //   * opencode-plugin-peers `send_message`  -> conversation between the two sessions
@@ -10,14 +11,18 @@
 
 import type { LogEntry } from "../../shared/types.ts";
 import type { OfficeStore } from "../store.ts";
+import { readPeers, type PeerEndpoint } from "./peers-registry.ts";
 import type { AgentSource, PermissionReply } from "./source.ts";
 import { readSse } from "./sse.ts";
 
 export interface OpencodeOptions {
   urls: string[];
+  /** opencode-plugin-peers registry directory; when set, running peers are discovered automatically. */
+  peersDir?: string;
+  peersPollMs?: number;
   /** Also show sub-agent (child) sessions as office members. */
   includeSubagents?: boolean;
-  /** Ignore sessions not updated within this window at startup. */
+  /** Ignore sessions not updated within this window at startup (explicit URLs only). */
   maxSessionAgeMs?: number;
   maxAgents?: number;
   /** Optional Authorization header value for the opencode servers. */
@@ -32,7 +37,8 @@ interface OcSession {
   slug?: string;
   parentID?: string;
   directory?: string;
-  time?: { created?: number; updated?: number };
+  agent?: string;
+  time?: { created?: number; updated?: number; archived?: number };
 }
 interface OcPart {
   id: string;
@@ -51,21 +57,35 @@ interface OcEvent {
   type: string;
   properties: Record<string, any>;
 }
+interface Server {
+  abort: AbortController;
+  /** Found through the peers registry (as opposed to OPENCODE_URLS). */
+  discovered: boolean;
+  missingSince?: number;
+}
 
 const PEER_HEADER = /^\[peer message from "([^"]+)"[^\]]*?sender endpoint: ([^\]\s;]+)[^\]]*\]/;
 const RECENT_SEND_MS = 2 * 60_000;
+const SERVER_GONE_MS = 60_000;
 
 export class OpencodeSource implements AgentSource {
   readonly name: string;
   private store!: OfficeStore;
   private readonly abort = new AbortController();
   private readonly fetch: typeof fetch;
+  private readonly servers = new Map<string, Server>();
+  private pollTimer: NodeJS.Timeout | undefined;
   /** sessionID -> base url of the server that owns it. */
   private readonly owner = new Map<string, string>();
   private readonly permissionOwner = new Map<string, string>();
   private readonly roleByMessage = new Map<string, "user" | "assistant">();
   private readonly partText = new Map<string, string>();
   private readonly sessions = new Map<string, OcSession>();
+  /** sessionID -> opencode agent name (from the session or its latest message). */
+  private readonly agentOf = new Map<string, string>();
+  /** Live peers from the registry, by session id. */
+  private readonly registered = new Map<string, PeerEndpoint>();
+  private readonly warnedAllow = new Set<string>();
   /** Peer bookkeeping: outgoing send_message calls and learned endpoint -> session. */
   private readonly recentSends: Array<{ from: string; to: string; message: string; at: number }> = [];
   private readonly endpointSession = new Map<string, string>();
@@ -73,18 +93,26 @@ export class OpencodeSource implements AgentSource {
 
   constructor(private readonly opts: OpencodeOptions) {
     this.fetch = opts.fetch ?? fetch;
-    this.name = `opencode (${opts.urls.join(", ")})`;
+    const parts = [...opts.urls];
+    if (opts.peersDir) parts.push("peers auto-discovery");
+    this.name = `opencode (${parts.join(", ")})`;
   }
 
   async start(store: OfficeStore): Promise<void> {
     this.store = store;
-    for (const url of this.opts.urls) {
-      void this.run(url.replace(/\/+$/, ""));
+    for (const url of this.opts.urls) this.connect(url.replace(/\/+$/, ""), false);
+    if (this.opts.peersDir) {
+      await this.pollPeers();
+      this.pollTimer = setInterval(() => void this.pollPeers(), this.opts.peersPollMs ?? 5_000);
+      this.pollTimer.unref?.();
     }
+    this.updateEmptyWarning();
   }
 
   async stop(): Promise<void> {
+    clearInterval(this.pollTimer);
     this.abort.abort();
+    for (const s of this.servers.values()) s.abort.abort();
   }
 
   async sendMessage(agentId: string, text: string): Promise<void> {
@@ -105,20 +133,100 @@ export class OpencodeSource implements AgentSource {
     });
   }
 
+  /* ------------------------------------------------------------- discovery */
+
+  private async pollPeers(): Promise<void> {
+    const peers = await readPeers(this.opts.peersDir!);
+    const now = Date.now();
+    const liveUrls = new Set<string>();
+    this.registered.clear();
+    for (const p of peers) {
+      liveUrls.add(p.serverUrl);
+      if (p.sessionId) this.registered.set(p.sessionId, p);
+      if (p.endpointId && p.sessionId) this.endpointSession.set(p.endpointId, p.sessionId);
+      if (p.name && p.sessionId) this.peerNameSession.set(p.name, p.sessionId);
+      const key = p.endpointId ?? p.sessionId ?? p.serverUrl;
+      if (p.peerPermissions === "allow" && !this.warnedAllow.has(key)) {
+        this.warnedAllow.add(key);
+        console.warn(`[peers] ${p.name ?? key} runs with peerPermissions "allow": peer-triggered actions skip the boss desk.`);
+      }
+    }
+    const unsafe = peers.filter((p) => p.peerPermissions === "allow").map((p) => p.name ?? p.sessionId ?? "?");
+    this.store.setWarning(
+      "peer-allow",
+      unsafe.length
+        ? `Peers plugin auto-approves peer-triggered actions for: ${[...new Set(unsafe)].join(", ")}. Set "peerPermissions": "ask" in their opencode.json so everything reaches your desk.`
+        : undefined,
+    );
+
+    for (const url of liveUrls) {
+      const known = this.servers.get(url);
+      if (known) known.missingSince = undefined;
+      else this.connect(url, true);
+    }
+    for (const [url, server] of this.servers) {
+      if (!server.discovered || liveUrls.has(url)) continue;
+      server.missingSince ??= now;
+      if (now - server.missingSince > SERVER_GONE_MS) this.dropServer(url);
+    }
+    // Sessions that registered after we connected to their server.
+    for (const [sessionId, peer] of this.registered) {
+      if (!this.store.getAgent(sessionId) && this.servers.has(peer.serverUrl)) {
+        void this.call<OcSession>(peer.serverUrl, `/session/${encodeURIComponent(sessionId)}`)
+          .then((s) => s && this.addSession(peer.serverUrl, s))
+          .catch(() => {});
+      }
+    }
+    for (const id of this.owner.keys()) this.refreshName(id);
+    this.updateEmptyWarning();
+  }
+
+  private connect(base: string, discovered: boolean): void {
+    if (this.servers.has(base)) return;
+    const abort = new AbortController();
+    this.abort.signal.addEventListener("abort", () => abort.abort(), { once: true });
+    this.servers.set(base, { abort, discovered });
+    void this.run(base, abort.signal);
+  }
+
+  private dropServer(base: string): void {
+    this.servers.get(base)?.abort.abort();
+    this.servers.delete(base);
+    for (const [id, owner] of [...this.owner]) {
+      if (owner !== base) continue;
+      this.owner.delete(id);
+      this.store.conversations.leave(id);
+      this.store.removeAgent(id);
+    }
+    this.updateEmptyWarning();
+  }
+
+  private updateEmptyWarning(): void {
+    const empty = this.store.listAgents().length === 0;
+    this.store.setWarning(
+      "no-agents",
+      empty
+        ? this.opts.peersDir
+          ? "No agents yet. Start opencode (with the peers plugin) in your project, or set OPENCODE_URLS."
+          : "No agents yet. Check that the opencode servers in OPENCODE_URLS are running."
+        : undefined,
+    );
+  }
+
   /* ---------------------------------------------------------------- wiring */
 
-  private async run(base: string): Promise<void> {
+  private async run(base: string, signal: AbortSignal): Promise<void> {
     let delay = 1_000;
-    while (!this.abort.signal.aborted) {
+    while (!signal.aborted) {
       try {
         await this.bootstrap(base);
         const res = await this.fetch(`${base}/event`, {
           headers: { accept: "text/event-stream", ...this.authHeaders() },
-          signal: this.abort.signal,
+          signal,
         });
         if (!res.ok) throw new Error(`GET /event -> ${res.status}`);
         delay = 1_000;
-        for await (const data of readSse(res, this.abort.signal)) {
+        for await (const data of readSse(res, signal)) {
           try {
             this.handle(base, JSON.parse(data) as OcEvent);
           } catch (err) {
@@ -126,7 +234,7 @@ export class OpencodeSource implements AgentSource {
           }
         }
       } catch (err) {
-        if (this.abort.signal.aborted) return;
+        if (signal.aborted) return;
         console.warn(`[opencode] ${base}: ${(err as Error).message}; retrying in ${delay / 1000}s`);
       }
       await new Promise((r) => setTimeout(r, delay));
@@ -134,14 +242,27 @@ export class OpencodeSource implements AgentSource {
     }
   }
 
+  /** Should this session be an office member? */
+  private wanted(base: string, s: OcSession): boolean {
+    if (s.time?.archived) return false;
+    if (s.parentID && !this.opts.includeSubagents) return false;
+    if (this.servers.get(base)?.discovered) {
+      // Discovered servers: only the sessions that are live peers (plus their sub-agents).
+      return this.registered.has(s.id) || (!!s.parentID && this.registered.has(s.parentID));
+    }
+    return true;
+  }
+
   private async bootstrap(base: string): Promise<void> {
-    const sessions = await this.call<OcSession[]>(base, "/session");
-    const statuses = await this.call<Record<string, { type: string }>>(base, "/session/status").catch(() => ({}) as Record<string, { type: string }>);
+    const sessions = (await this.call<OcSession[]>(base, "/session")) ?? [];
+    const statuses =
+      (await this.call<Record<string, { type: string }>>(base, "/session/status").catch(() => undefined)) ?? ({} as Record<string, { type: string }>);
     const maxAge = this.opts.maxSessionAgeMs ?? 12 * 3600_000;
     const now = Date.now();
+    const discovered = this.servers.get(base)?.discovered;
     const chosen = sessions
-      .filter((s) => this.opts.includeSubagents || !s.parentID)
-      .filter((s) => statuses[s.id]?.type === "busy" || now - (s.time?.updated ?? s.time?.created ?? 0) < maxAge)
+      .filter((s) => this.wanted(base, s))
+      .filter((s) => discovered || statuses[s.id]?.type === "busy" || now - (s.time?.updated ?? s.time?.created ?? 0) < maxAge)
       .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
       .slice(0, this.opts.maxAgents ?? 16);
 
@@ -156,30 +277,73 @@ export class OpencodeSource implements AgentSource {
 
     await Promise.all(
       chosen.map(async (s) => {
-        const msgs = await this.call<Array<{ info: { id: string; role: "user" | "assistant" }; parts: OcPart[] }>>(
+        const msgs = await this.call<Array<{ info: { id: string; role: "user" | "assistant"; agent?: string }; parts: OcPart[] }>>(
           base,
           `/session/${encodeURIComponent(s.id)}/message?limit=40`,
         ).catch(() => []);
         for (const m of msgs.slice(-40)) {
           this.roleByMessage.set(m.info.id, m.info.role);
+          if (m.info.agent) this.learnAgent(s.id, m.info.agent);
           for (const part of m.parts) this.onPart(part, false);
         }
       }),
     );
+    this.updateEmptyWarning();
   }
 
   private addSession(base: string, s: OcSession): void {
-    if (!this.opts.includeSubagents && s.parentID) return;
+    if (!this.wanted(base, s)) {
+      // An archived or no-longer-wanted session leaves the office.
+      if (this.store.getAgent(s.id) && s.time?.archived) this.store.removeAgent(s.id);
+      return;
+    }
     const known = this.store.getAgent(s.id);
     if (!known && this.store.listAgents().length >= (this.opts.maxAgents ?? 16)) return;
     this.owner.set(s.id, base);
     this.sessions.set(s.id, s);
+    if (s.agent) this.agentOf.set(s.id, s.agent);
     this.store.upsertAgent({
       id: s.id,
-      name: s.title?.trim() || s.slug || s.id.slice(-6),
+      name: known?.name ?? this.baseName(s.id),
       status: known?.status ?? "idle",
-      activity: s.directory,
+      activity: s.title,
+      agentName: this.agentOf.get(s.id),
+      directory: s.directory ?? this.registered.get(s.id)?.directory,
     });
+    this.refreshName(s.id);
+    this.updateEmptyWarning();
+  }
+
+  private learnAgent(sessionId: string, agent: string): void {
+    if (this.agentOf.get(sessionId) === agent) return;
+    this.agentOf.set(sessionId, agent);
+    if (this.store.getAgent(sessionId)) {
+      this.store.patchAgent(sessionId, { agentName: agent });
+      this.refreshName(sessionId);
+    }
+  }
+
+  /** Agent name first (that's how the boss knows them), then peer name, then session title. */
+  private baseName(id: string): string {
+    const s = this.sessions.get(id);
+    return this.agentOf.get(id) ?? this.registered.get(id)?.name ?? (s?.title?.trim() || s?.slug || id.slice(-6));
+  }
+
+  /** Keep names unique: two sessions of the same agent become "reviewer (backend)" and "reviewer (web)". */
+  private refreshName(id: string): void {
+    const agents = this.store.listAgents();
+    const base = this.baseName(id);
+    const clashes = agents.filter((a) => a.id !== id && this.baseName(a.id) === base);
+    const qualify = (sid: string) => {
+      const extra = this.registered.get(sid)?.name ?? this.sessions.get(sid)?.title?.trim() ?? sid.slice(-6);
+      return extra && extra !== base ? `${base} (${extra})` : `${base} (${sid.slice(-4)})`;
+    };
+    const name = clashes.length ? qualify(id) : base;
+    if (this.store.getAgent(id)?.name !== name) this.store.patchAgent(id, { name });
+    for (const other of clashes) {
+      const n = qualify(other.id);
+      if (other.name !== n) this.store.patchAgent(other.id, { name: n });
+    }
   }
 
   private handle(base: string, ev: OcEvent): void {
@@ -210,6 +374,10 @@ export class OpencodeSource implements AgentSource {
         break;
       case "message.updated":
         if (p.info?.id && p.info?.role) this.roleByMessage.set(p.info.id, p.info.role);
+        {
+          const sid = p.info?.sessionID ?? p.sessionID;
+          if (sid && typeof p.info?.agent === "string") this.learnAgent(sid, p.info.agent);
+        }
         break;
       case "message.part.updated":
         if (p.part) this.onPart(p.part as OcPart, true);

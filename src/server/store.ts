@@ -13,6 +13,7 @@ export class OfficeStore extends EventEmitter<{ event: [ServerEvent] }> {
   private permissions = new Map<string, PermissionRequest>();
   private logs = new Map<string, LogEntry[]>();
   private snapshotTimer: NodeJS.Timeout | undefined;
+  private warnings = new Map<string, string>();
   readonly conversations: ConversationTracker;
   /** Lets standing rules answer a request before anyone walks to the boss. Returns true if handled. */
   screenPermission?: (p: PermissionRequest) => boolean;
@@ -35,7 +36,16 @@ export class OfficeStore extends EventEmitter<{ event: [ServerEvent] }> {
       permissions,
       rules: this.rulesProvider?.() ?? [],
       source: this.sourceName,
+      warnings: [...this.warnings.values()],
     };
+  }
+
+  /** Set (or clear, with undefined) a warning shown in the office's top banner. */
+  setWarning(key: string, message: string | undefined): void {
+    if ((message ?? undefined) === this.warnings.get(key)) return;
+    if (message) this.warnings.set(key, message);
+    else this.warnings.delete(key);
+    this.changed();
   }
 
   getAgent(id: string): Agent | undefined {

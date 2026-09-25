@@ -13,6 +13,10 @@ export interface Agent {
   activity?: string;
   /** Deterministic avatar look, derived from the id when not provided. */
   look?: AvatarLook;
+  /** opencode agent (e.g. "reviewer"); used to find the agent's memory file. */
+  agentName?: string;
+  /** Project directory the agent works in. */
+  directory?: string;
 }
 
 export interface AvatarLook {
@@ -63,6 +67,8 @@ export interface OfficeSnapshot {
   permissions: PermissionRequest[];
   rules: PermissionRule[];
   source: string;
+  /** Setup problems worth showing the boss (e.g. unsafe plugin settings). */
+  warnings: string[];
 }
 
 /** Server -> client push messages (sent over SSE). */

@@ -38,6 +38,7 @@ approvals therefore live in your editable rule list, never in opencode's own
 "always" list, which you can't edit or revoke from outside.
 
 **New here? Follow [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) step by step.**
+**Already have a project with opencode agents, peers and memory files? See [docs/LINK_EXISTING_PROJECT.md](docs/LINK_EXISTING_PROJECT.md).**
 
 ## Quick start
 
@@ -71,7 +72,7 @@ OPENCODE_URLS=http://127.0.0.1:4096 npm start      # http://localhost:4317
 
 | opencode | Office |
 | --- | --- |
-| top-level session (`GET /session`) | an agent (the name is the session title) |
+| top-level session (`GET /session`), or each live peer in the peers registry | an agent, named after its opencode agent (then peer name, then session title) |
 | `session.status` `busy` / `retry` | working |
 | `session.status` `idle`, `session.idle` | idle |
 | `permission.asked` / `question.asked` | needs review (the agent walks to the boss) |
@@ -103,7 +104,7 @@ personal data about people in it.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `OPENCODE_URLS` | *(empty: simulation)* | Comma-separated opencode server URLs |
+| `OPENCODE_URLS` | | Comma-separated opencode server URLs (optional when peers are auto-discovered). With neither, the office runs the simulation |
 | `OFFICE_SOURCE` | | Set to `mock` to force simulation mode |
 | `OFFICE_PORT` / `OFFICE_HOST` | `4317` / `127.0.0.1` | Where the office API listens |
 | `OFFICE_TOKEN` | | If set, the API requires `?token=` or `Authorization: Bearer`. Required when `OFFICE_HOST` is not loopback |
@@ -114,6 +115,10 @@ personal data about people in it.
 | `OFFICE_SESSION_MAX_AGE_H` | `12` | Ignore sessions not updated in this many hours (at startup) |
 | `OFFICE_CONVERSATION_TTL_S` | `60` | Silence after which a conversation ends |
 | `OPENCODE_AUTHORIZATION` | | `Authorization` header value sent to opencode, if your server needs one |
+| `OFFICE_MEMORY_PATH` | `{office}/{slug}.md` | Memory file template(s), `;`-separated, e.g. `{project}/agents/{agent}/memory.md` ([details](docs/LINK_EXISTING_PROJECT.md)) |
+| `OFFICE_MEMORY_ROOTS` | | Extra folders memory files may live in (`;`-separated) |
+| `OFFICE_PEERS_DIR` | `$XDG_DATA_HOME/opencode-plugin-peers/peers.d` | Peers plugin registry used for auto-discovery |
+| `OFFICE_DISCOVER_PEERS` | `1` | `0` disables auto-discovery of running peers |
 | `OFFICE_RULES_FILE` | `./.office/permission-rules.json` | Where the boss's permission rules are saved (simulation keeps them in memory) |
 
 ## Architecture

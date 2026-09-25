@@ -34,6 +34,7 @@ const hud = {
   badge: document.querySelector<HTMLElement>("#inbox-badge")!,
   resetView: document.querySelector<HTMLButtonElement>("#reset-view")!,
   banner: document.querySelector<HTMLElement>("#sim-banner")!,
+  warnings: document.querySelector<HTMLElement>("#warn-banner")!,
   windows: document.querySelector<HTMLElement>("#windows")!,
 };
 
@@ -126,6 +127,14 @@ function onSnapshot(s: OfficeSnapshot): void {
   rulesPanel.update(s.rules);
   hud.source.textContent = s.source;
   hud.banner.hidden = s.source !== "simulation";
+  hud.warnings.replaceChildren(
+    ...s.warnings.map((w) => {
+      const line = document.createElement("div");
+      line.textContent = `! ${w}`;
+      return line;
+    }),
+  );
+  hud.warnings.hidden = s.warnings.length === 0;
   const n = s.permissions.length;
   hud.badge.textContent = String(n);
   hud.badge.hidden = n === 0;

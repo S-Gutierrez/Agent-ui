@@ -30,7 +30,7 @@ beforeAll(async () => {
   };
   const desk = new PermissionDesk(store, source, new RuleStore());
   store.addPermission({ id: "p1", agentId: "a1", title: "bash: npm test", at: 1, permission: "bash", patterns: ["npm test"], always: ["npm *"] });
-  const app = createApp({ store, source, desk, memory: new MemoryStore(dir) });
+  const app = createApp({ store, source, desk, memory: new MemoryStore({ officeDir: dir }) });
   server = createServer((req, res) => void app(req, res));
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -119,7 +119,7 @@ describe("HTTP API", () => {
     expect(put.status).toBe(200);
     expect(await readFile(path.join(dir, "ada-lovelace.md"), "utf8")).toBe("# notes");
     const got = await (await fetch(`${base}/api/agents/a1/memory`)).json();
-    expect(got).toEqual({ content: "# notes", exists: true, file: "ada-lovelace.md" });
+    expect(got).toEqual({ content: "# notes", exists: true, file: `${path.basename(dir)}/ada-lovelace.md` });
   });
 
   it("slugs cannot escape the directory", () => {
