@@ -28,7 +28,7 @@ export function facingTowards(from: { x: number; y: number }, to: { x: number; y
 export class World {
   layout: OfficeLayout = buildLayout([]);
   avatars = new Map<string, Avatar>();
-  snapshot: OfficeSnapshot = { agents: [], conversations: [], permissions: [], rules: [], source: "" };
+  snapshot: OfficeSnapshot = { agents: [], conversations: [], permissions: [], rules: [], source: "", warnings: [] };
   private layoutKey = "";
 
   update(snapshot: OfficeSnapshot): void {

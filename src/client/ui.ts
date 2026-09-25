@@ -223,7 +223,7 @@ export class TerminalWindow {
     if (this.tab !== "memory" || this.agent.id !== agentId) return;
 
     const header = el("div", "mem-header");
-    header.append(el("span", "", `$ cat memory/${mem.file}`));
+    header.append(el("span", "", `$ cat ${mem.file}`));
     const edit = el("button", "mem-btn", mem.exists ? "edit" : "create");
     edit.type = "button";
     header.append(edit);
@@ -256,7 +256,7 @@ export class TerminalWindow {
       };
       cancel.onclick = () => this.show("memory");
       const bar = el("div", "mem-header");
-      bar.append(el("span", "", `editing memory/${mem.file}`), status, save, cancel);
+      bar.append(el("span", "", `editing ${mem.file}`), status, save, cancel);
       this.body.replaceChildren(bar, area);
       area.focus();
     };

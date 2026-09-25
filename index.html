@@ -22,8 +22,9 @@
       <button id="inbox-btn" type="button">inbox <b id="inbox-badge" hidden>0</b></button>
     </header>
     <div id="sim-banner" class="sim-banner" hidden>
-      Simulation mode - these agents are fake. Set <code>OPENCODE_URLS</code> to connect your opencode servers.
+      Simulation mode - these agents are fake. Start opencode with the peers plugin (auto-discovered) or set <code>OPENCODE_URLS</code>.
     </div>
+    <div id="warn-banner" class="warn-banner" role="alert" hidden></div>
     <canvas id="office" aria-label="Isometric office with AI agents. Click an agent to open its terminal."></canvas>
     <div id="windows"></div>
     <script type="module" src="/src/client/main.ts"></script>

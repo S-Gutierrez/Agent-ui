@@ -3,6 +3,9 @@
 
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import nodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OpencodeSource } from "../src/server/sources/opencode.ts";
 import { OfficeStore } from "../src/server/store.ts";
@@ -14,7 +17,7 @@ interface Fake {
   close: () => Promise<void>;
 }
 
-async function fakeOpencode(): Promise<Fake> {
+async function fakeOpencode(agents: Record<string, string> = {}): Promise<Fake> {
   const clients: ServerResponse[] = [];
   const requests: Fake["requests"] = [];
   const now = Date.now();
@@ -33,13 +36,15 @@ async function fakeOpencode(): Promise<Fake> {
       clients.push(res);
       return;
     }
-    if (path === "/session")
-      return json([
-        { id: "ses_a", title: "alice", time: { created: now, updated: now } },
-        { id: "ses_b", title: "bob", time: { created: now, updated: now } },
-        { id: "ses_child", title: "sub", parentID: "ses_a", time: { created: now, updated: now } },
-        { id: "ses_old", title: "ancient", time: { created: 0, updated: 0 } },
-      ]);
+    const all = [
+      { id: "ses_a", title: "alice", time: { created: now, updated: now } },
+      { id: "ses_b", title: "bob", time: { created: now, updated: now } },
+      { id: "ses_child", title: "sub", parentID: "ses_a", time: { created: now, updated: now } },
+      { id: "ses_old", title: "ancient", time: { created: 0, updated: 0 } },
+    ].map((x) => (agents[x.id] ? { ...x, agent: agents[x.id], directory: "/work/proj" } : x));
+    if (path === "/session") return json(all);
+    const one = /^\/session\/([^/]+)$/.exec(path ?? "");
+    if (one && one[1] !== "status" && req.method === "GET") return json(all.find((x) => x.id === one[1]));
     if (path === "/session/status") return json({ ses_a: { type: "busy" } });
     if (path === "/permission") return json([]);
     if (path?.endsWith("/message") && req.method === "GET")
@@ -196,5 +201,58 @@ describe("OpencodeSource", () => {
     await source.sendMessage("ses_b", "hello there");
     const req = fake.requests.find((r) => r.url === "/session/ses_b/prompt_async")!;
     expect(JSON.parse(req.body)).toEqual({ parts: [{ type: "text", text: "hello there" }] });
+  });
+});
+
+describe("OpencodeSource peers auto-discovery", () => {
+  it("finds agents through the peers registry, names them by opencode agent and warns about auto-approval", async () => {
+    const fake = await fakeOpencode({ ses_a: "reviewer", ses_b: "builder", ses_old: "reviewer" });
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "peers-"));
+    const entry = (sessionId: string, name: string, peerPermissions: string) => ({
+      version: 2,
+      endpointId: `ep_${name}`,
+      processId: "p1",
+      sessionId,
+      name,
+      directory: "/work/proj",
+      serverUrl: fake.url + "/",
+      inboxToken: "SECRET-TOKEN",
+      timestamps: { heartbeatAt: Date.now() },
+      policy: { peerPermissions },
+    });
+    await writeFile(nodePath.join(dir, "p1.a.v2.json"), JSON.stringify(entry("ses_a", "backend", "ask")));
+    await writeFile(nodePath.join(dir, "p1.b.v2.json"), JSON.stringify(entry("ses_b", "frontend", "allow")));
+    // A stale entry and a non-loopback server must be ignored.
+    await writeFile(nodePath.join(dir, "old.json"), JSON.stringify({ ...entry("ses_old", "old", "ask"), timestamps: { heartbeatAt: 0 } }));
+    await writeFile(nodePath.join(dir, "evil.json"), JSON.stringify({ ...entry("ses_x", "evil", "ask"), serverUrl: "http://example.com" }));
+
+    const store = new OfficeStore("test");
+    const source = new OpencodeSource({ urls: [], peersDir: dir, peersPollMs: 50 });
+    try {
+      await source.start(store);
+      await until(() => store.listAgents().length === 2);
+      await new Promise((r) => setTimeout(r, 100));
+      const byId = Object.fromEntries(store.listAgents().map((a) => [a.id, a]));
+      // Only live registered peers - not every historic session on that server.
+      expect(Object.keys(byId).sort()).toEqual(["ses_a", "ses_b"]);
+      expect(byId.ses_a).toMatchObject({ name: "reviewer", agentName: "reviewer", directory: "/work/proj" });
+      expect(byId.ses_b!.name).toBe("builder");
+      expect(store.snapshot().warnings.join()).toMatch(/frontend/);
+      expect(JSON.stringify(store.snapshot())).not.toContain("SECRET-TOKEN");
+      expect(fake.requests.some((r) => r.url.includes("example.com"))).toBe(false);
+
+      // send_message by peer name maps straight to the registered session.
+      fake.emit("message.part.updated", {
+        sessionID: "ses_a",
+        part: { id: "t1", sessionID: "ses_a", messageID: "m1", type: "tool", tool: "send_message", state: { status: "running", input: { to: "frontend", message: "hi" } } },
+      });
+      await until(() => store.snapshot().conversations.length === 1);
+      expect(store.snapshot().conversations[0]!.participants).toEqual(["ses_a", "ses_b"]);
+    } finally {
+      await source.stop();
+      store.dispose();
+      await fake.close();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

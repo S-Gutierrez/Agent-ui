@@ -508,3 +508,21 @@ button:disabled {
   border-top: 1px solid var(--line);
   border-bottom: none;
 }
+
+.warn-banner {
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(760px, calc(100vw - 32px));
+  background: rgba(239, 83, 80, 0.14);
+  border: 1px solid rgba(239, 83, 80, 0.5);
+  color: #ffc9c7;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  z-index: 4;
+}
+.sim-banner:not([hidden]) + .warn-banner {
+  top: 90px;
+}

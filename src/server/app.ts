@@ -107,14 +107,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, opts: Ap
     }
     case "GET /agents/:id/memory": {
       const agent = requireAgent(store, id);
-      const { content, exists, file } = await memory.read(agent.name);
-      return sendJson(res, 200, { content, exists, file: path.basename(file) });
+      const mem = await memory.read(agent).catch((e: Error) => {
+        throw new HttpError(400, e.message);
+      });
+      return sendJson(res, 200, mem);
     }
     case "PUT /agents/:id/memory": {
       const agent = requireAgent(store, id);
       const body = await readJson(req);
       if (typeof body.content !== "string") throw new HttpError(400, "content must be a string");
-      await memory.write(agent.name, body.content).catch((e: Error) => {
+      await memory.write(agent, body.content).catch((e: Error) => {
         throw new HttpError(400, e.message);
       });
       return sendJson(res, 200, { ok: true });
