@@ -17,6 +17,10 @@ export interface Agent {
   agentName?: string;
   /** Project directory the agent works in. */
   directory?: string;
+  /** Name other agents use to reach it (opencode-plugin-peers). Should equal agentName. */
+  peerName?: string;
+  /** From the agent's `.opencode/agents/<name>.md` frontmatter. */
+  description?: string;
 }
 
 export interface AvatarLook {

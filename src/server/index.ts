@@ -39,10 +39,12 @@ const source: AgentSource = useMock
 
 const memoryDir = path.resolve(env.OFFICE_MEMORY_DIR ?? (useMock ? path.join(root, "examples/memory") : path.join(root, "memory")));
 const splitList = (v: string | undefined) => (v ?? "").split(/[;\n]/).map((s) => s.trim()).filter(Boolean);
-// e.g. OFFICE_MEMORY_PATH="{project}/agents/{agent}/memory.md" (several templates separated by ";")
+// Real agents: <repo>/.opencode/memory/<agent>.md next to <repo>/.opencode/agents/<agent>.md.
+// Override with OFFICE_MEMORY_PATH (several templates separated by ";").
+const memoryTemplates = splitList(env.OFFICE_MEMORY_PATH);
 const memory = new MemoryStore({
   officeDir: memoryDir,
-  templates: splitList(env.OFFICE_MEMORY_PATH),
+  templates: memoryTemplates.length ? memoryTemplates : useMock ? ["{office}/{slug}.md"] : ["{repo}/.opencode/memory/{agent}.md"],
   extraRoots: splitList(env.OFFICE_MEMORY_ROOTS).map((r) => path.resolve(r)),
 });
 const store = new OfficeStore(source.name, Number(env.OFFICE_CONVERSATION_TTL_S ?? 60) * 1000);

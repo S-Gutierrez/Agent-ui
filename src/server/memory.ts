@@ -1,6 +1,7 @@
 import { mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Agent } from "../shared/types.ts";
+import { findRepoRoot } from "./project.ts";
 
 export const MAX_MEMORY_BYTES = 256 * 1024;
 
@@ -27,7 +28,8 @@ export interface MemoryOptions {
   /**
    * Where an agent's memory lives, first existing match wins. Variables:
    *   {office}  the office memory folder
-   *   {project} the agent's project directory (where opencode runs)
+   *   {repo}    the agent's repository: nearest folder with `.opencode/` (or `.git`) above where opencode runs
+   *   {project} the exact directory opencode runs in
    *   {agent}   the opencode agent name, e.g. `reviewer` (falls back to the display name)
    *   {slug}    lowercase slug of the agent name
    * Default: `{office}/{slug}.md`.
@@ -63,6 +65,7 @@ export class MemoryStore {
     const vars: Record<string, string | undefined> = {
       office: path.resolve(this.opts.officeDir),
       project: agent.directory ? path.resolve(agent.directory) : undefined,
+      repo: agent.directory ? findRepoRoot(agent.directory) : undefined,
       agent: safeSegment(who),
       slug: memorySlug(who),
     };
@@ -122,7 +125,8 @@ export class MemoryStore {
   }
 
   private roots(agent: Pick<Agent, "directory">): string[] {
-    return [this.opts.officeDir, agent.directory, ...(this.opts.extraRoots ?? [])].filter((r): r is string => !!r).map((r) => path.resolve(r));
+    const repo = agent.directory ? findRepoRoot(agent.directory) : undefined;
+    return [this.opts.officeDir, repo, agent.directory, ...(this.opts.extraRoots ?? [])].filter((r): r is string => !!r).map((r) => path.resolve(r));
   }
 
   /** Resolve symlinks of the file (or its nearest existing parent) and re-check the roots. */

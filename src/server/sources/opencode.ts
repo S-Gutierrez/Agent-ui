@@ -11,6 +11,7 @@
 
 import type { LogEntry } from "../../shared/types.ts";
 import type { OfficeStore } from "../store.ts";
+import { agentDefinitions, BUILTIN_AGENTS, findRepoRoot, PEER_NAME_RE } from "../project.ts";
 import { readPeers, type PeerEndpoint } from "./peers-registry.ts";
 import type { AgentSource, PermissionReply } from "./source.ts";
 import { readSse } from "./sse.ts";
@@ -178,6 +179,7 @@ export class OpencodeSource implements AgentSource {
       }
     }
     for (const id of this.owner.keys()) this.refreshName(id);
+    this.checkNaming();
     this.updateEmptyWarning();
   }
 
@@ -311,6 +313,7 @@ export class OpencodeSource implements AgentSource {
       directory: s.directory ?? this.registered.get(s.id)?.directory,
     });
     this.refreshName(s.id);
+    this.checkNaming();
     this.updateEmptyWarning();
   }
 
@@ -320,6 +323,7 @@ export class OpencodeSource implements AgentSource {
     if (this.store.getAgent(sessionId)) {
       this.store.patchAgent(sessionId, { agentName: agent });
       this.refreshName(sessionId);
+      this.checkNaming();
     }
   }
 
@@ -344,6 +348,65 @@ export class OpencodeSource implements AgentSource {
       const n = qualify(other.id);
       if (other.name !== n) this.store.patchAgent(other.id, { name: n });
     }
+    this.enrich(id);
+  }
+
+  /** Peer name and agent description (from `<repo>/.opencode/agents/<agent>.md`). */
+  private enrich(id: string): void {
+    const agent = this.store.getAgent(id);
+    if (!agent) return;
+    const peerName = this.registered.get(id)?.name;
+    const agentName = this.agentOf.get(id);
+    const dir = agent.directory;
+    const description = agentName && dir ? agentDefinitions(findRepoRoot(dir)).get(agentName)?.description : undefined;
+    if (agent.peerName !== peerName || agent.description !== description) this.store.patchAgent(id, { peerName, description });
+  }
+
+  /**
+   * Every agent should be a custom agent from `.opencode/agents/` and use that
+   * same name as its peer name, so "send_message to reviewer" reaches the
+   * reviewer and its memory file is found.
+   */
+  private checkNaming(): void {
+    const mismatched: string[] = [];
+    const builtin: string[] = [];
+    const undefinedAgents: string[] = [];
+    for (const a of this.store.listAgents()) {
+      const agentName = this.agentOf.get(a.id);
+      if (!agentName) continue;
+      if (BUILTIN_AGENTS.has(agentName)) builtin.push(a.name);
+      else if (a.directory && !agentDefinitions(findRepoRoot(a.directory)).has(agentName)) undefinedAgents.push(agentName);
+      if (a.peerName && a.peerName !== agentName) mismatched.push(`"${a.peerName}" runs agent "${agentName}"`);
+    }
+    this.store.setWarning(
+      "peer-name",
+      mismatched.length
+        ? `Peer name should equal the agent name: ${mismatched.join("; ")}. Click the agent and use "rename peer", or start it with npm run agent.`
+        : undefined,
+    );
+    this.store.setWarning(
+      "builtin-agent",
+      builtin.length ? `Using a built-in agent instead of one from .opencode/agents/: ${builtin.join(", ")}. Start it with opencode --agent <name>.` : undefined,
+    );
+    this.store.setWarning(
+      "unknown-agent",
+      undefinedAgents.length ? `No .opencode/agents/<name>.md found for: ${[...new Set(undefinedAgents)].join(", ")}.` : undefined,
+    );
+  }
+
+  /** Runs `/peers-name <agent>` in the agent's session so its peer name matches the agent name. */
+  async fixPeerName(agentId: string): Promise<string> {
+    const base = this.owner.get(agentId);
+    const agentName = this.agentOf.get(agentId);
+    if (!base || !agentName) throw new Error("unknown agent or agent name");
+    if (!PEER_NAME_RE.test(agentName)) throw new Error(`"${agentName}" is not a valid peer name (1-32 letters, digits, space, _ or -)`);
+    await this.call(base, `/session/${encodeURIComponent(agentId)}/command`, {
+      method: "POST",
+      body: JSON.stringify({ command: "peers-name", arguments: agentName }),
+      signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(15_000)]),
+    });
+    await this.pollPeers().catch(() => {});
+    return agentName;
   }
 
   private handle(base: string, ev: OcEvent): void {

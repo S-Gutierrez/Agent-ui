@@ -1,100 +1,125 @@
 # Link an existing project
 
-Use this guide if you already have a project with opencode agents, the peers
-plugin and per-agent memory files like these:
+Agent Office works with this repository layout, using your files in place
+(nothing is copied):
 
 ```
-my-project/
-├── .opencode/agents/reviewer.md      # opencode agent definitions
-├── .opencode/agents/builder.md
-└── agents/
-    ├── reviewer/memory.md            # each agent's memory
-    └── builder/memory.md
+my-repo/
+├── opencode.json                    # your opencode config (with the peers plugin)
+└── .opencode/
+    ├── agents/
+    │   ├── reviewer.md              # opencode agent definitions
+    │   └── builder.md
+    └── memory/
+        ├── reviewer.md              # each agent's personal memory
+        └── builder.md
 ```
 
-Agent Office uses those resources **in place**. It copies nothing into its own
-folder.
+It rests on one convention: **agent name = peer name = memory file name.**
 
-- **Agents:** found automatically through the peers plugin's local registry. You don't need to configure ports or URLs.
-- **Names:** each avatar is named after its **opencode agent** (`reviewer`, `builder`). If two sessions use the same agent, the peer name is added, e.g. `reviewer (backend)`.
-- **Memory:** read from and saved to `<project>/agents/<agent>/memory.md`.
+| Thing | Where the name comes from |
+| --- | --- |
+| Agent | `.opencode/agents/<name>.md` (you start it with `opencode --agent <name>`) |
+| Peer name (how other agents address it with `send_message`) | must be the same `<name>` |
+| Memory | `.opencode/memory/<name>.md` |
+| Avatar in the office | `<name>` |
 
 ## Step by step
 
-1. **Get Agent Office** (skip if you already have it):
+1. **Update Agent Office.**
    ```bash
-   git clone https://github.com/S-Gutierrez/Agent-ui.git agent-office
-   cd agent-office && npm install
+   cd agent-office
+   git pull
+   npm install
    ```
 
-2. **Make the agents always ask you.** Open `my-project/opencode.json`, or
-   `~/.config/opencode/opencode.json`, and make sure it contains:
+2. **Check `my-repo/opencode.json`.** It should contain:
    ```json
    {
      "permission": "ask",
      "plugin": [["opencode-plugin-peers", { "peerPermissions": "ask" }]]
    }
    ```
-   Keep your other settings, such as each instance's peer `"name"`. If a peer
-   still runs with `"peerPermissions": "allow"`, the office shows a red warning
-   naming it.
+   Leave the peer `"name"` out of the shared file, because every agent would
+   get the same name. The launcher in the next step sets it per agent.
 
-3. **Start your agents as you normally do**, e.g. `opencode` in `my-project`,
-   one terminal per agent. You don't need `--port`: the peers plugin publishes
-   each instance's server address and the office reads it.
-
-4. **Start the office with your memory layout.** From the `agent-office` folder:
+3. **Start each agent with the launcher**, one terminal per agent, from the
+   `agent-office` folder:
    ```bash
-   OFFICE_MEMORY_PATH="{project}/agents/{agent}/memory.md" npm run dev
+   npm run agent -- reviewer --repo ~/code/my-repo
+   npm run agent -- builder  --repo ~/code/my-repo
    ```
-   On Windows PowerShell:
-   ```powershell
-   $env:OFFICE_MEMORY_PATH="{project}/agents/{agent}/memory.md"; npm run dev
+   The launcher does four things:
+   - checks that `.opencode/agents/reviewer.md` exists (if not, it lists the agents that do)
+   - runs `opencode --agent reviewer` in the repo
+   - sets **this process's** peer name to `reviewer`, and forces `peerPermissions: "ask"`. Your other peers plugin options are kept. Your files are not modified: the override goes through opencode's `OPENCODE_CONFIG_CONTENT`.
+   - creates `.opencode/memory/reviewer.md` if it doesn't exist yet
+
+   To pass extra opencode flags, put them after `--`, e.g.
+   `npm run agent -- reviewer --repo ~/code/my-repo -- --model anthropic/claude-sonnet-4-5`.
+
+   Prefer starting opencode yourself? That works too. Use
+   `opencode --agent reviewer`, then run `/peers-name reviewer` inside it (or
+   use the office's **rename peer** button, see below).
+
+4. **Start the office** from the `agent-office` folder, in another terminal:
+   ```bash
+   npm run dev
    ```
+   You don't need any settings. The office finds the running agents through
+   the peers plugin, and memory defaults to `<repo>/.opencode/memory/<agent>.md`.
 
-5. **Open <http://127.0.0.1:5173>.** Every running peer appears at its desk.
-   Click an agent and open its **memory** tab to see its
-   `agents/<agent>/memory.md`. **edit** saves back to that same file.
+5. **Open <http://127.0.0.1:5173>.** Each agent sits at its desk under its
+   agent name.
+   - Hovering the title of its terminal window shows the `description` from `.opencode/agents/<name>.md`.
+   - The **memory** tab shows `.opencode/memory/<name>.md`, and **edit** saves back to that file.
 
-## Placeholders in `OFFICE_MEMORY_PATH`
+## Checks the office does for you
+
+A red banner at the top appears when a convention is broken:
+
+| Warning | What to do |
+| --- | --- |
+| *Peer name should equal the agent name: "my-repo-a3f2" runs agent "reviewer"* | Click that agent. Its terminal shows **rename peer to "reviewer"**, which runs `/peers-name reviewer` in that session. Or restart it with `npm run agent`. |
+| *Using a built-in agent instead of one from .opencode/agents/* | That session runs opencode's built-in `build`/`plan` agent. Restart it with `npm run agent -- <name> ...` or `opencode --agent <name>`. |
+| *No .opencode/agents/<name>.md found for: ...* | The session's agent isn't defined in the repo (it may be a global agent from `~/.config/opencode/agents/`). Its memory is still `.opencode/memory/<name>.md`. |
+| *Peers plugin auto-approves peer-triggered actions for: ...* | Set `"peerPermissions": "ask"` (the launcher does this automatically). |
+| *No agents yet* | Start an agent (step 3). If you changed the plugin's `storageDir`, set `OFFICE_PEERS_DIR`. |
+
+## How the pieces are found
+
+- **Repository folder:** the nearest folder above where opencode runs that
+  contains `.opencode/` (or else `.git/`). An agent started in
+  `my-repo/packages/api` therefore still uses `my-repo/.opencode/memory/`.
+- **Running agents:** the peers plugin publishes each running instance
+  (server address, session, peer name, folder) in
+  `~/.local/share/opencode-plugin-peers/peers.d/`. The office reads only those
+  fields. It skips entries older than 60 seconds, connects only to servers on
+  your machine, and never reads the inbox token those files also contain.
+- **Memory files** must end in `.md` and stay inside the repository, the
+  office's own `memory/` folder, or folders you list in `OFFICE_MEMORY_ROOTS`.
+  Symlinks that point outside are refused.
+
+## Different layout?
+
+Set `OFFICE_MEMORY_PATH` to one or more templates, separated by `;`. The first
+existing file wins.
 
 | Placeholder | Becomes |
 | --- | --- |
-| `{project}` | The folder where that agent's opencode runs (its project root) |
-| `{agent}` | The opencode agent name, e.g. `reviewer` (case kept; unsafe characters replaced with `-`) |
-| `{slug}` | Lower-case version of the agent name |
-| `{office}` | Agent Office's own `memory/` folder |
+| `{repo}` | The repository folder (see above) |
+| `{project}` | The exact folder opencode runs in |
+| `{agent}` | The opencode agent name (case kept) |
+| `{slug}` | Lower-case agent name |
+| `{office}` | Agent Office's `memory/` folder |
 
-- **Several layouts:** separate templates with `;`. The first file that exists
-  wins, and new files are created at the first template. For example:
-  `OFFICE_MEMORY_PATH="{project}/agents/{agent}/memory.md;{project}/.opencode/memory/{agent}.md"`.
-- **Allowed folders:** for safety, memory files must end in `.md` and live
-  inside the agent's project, the office's `memory/` folder, or folders you
-  list in `OFFICE_MEMORY_ROOTS` (separated by `;`). Symlinks that lead outside
-  those folders are refused.
+The default is `{repo}/.opencode/memory/{agent}.md`.
 
 ## Options
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `OFFICE_PEERS_DIR` | `$XDG_DATA_HOME/opencode-plugin-peers/peers.d` (usually `~/.local/share/...`) | Where the peers plugin keeps its registry. Set it if you changed the plugin's `storageDir`. |
-| `OFFICE_DISCOVER_PEERS` | `1` | Set to `0` to turn off auto-discovery and use only `OPENCODE_URLS`. |
-| `OPENCODE_URLS` | | Extra opencode servers to watch (all their recent sessions are shown). |
-| `OFFICE_SOURCE` | auto | `opencode` forces live mode even before any peer is running; `mock` forces the simulation. |
-
-## What the office reads from the peers registry
-
-It reads only the server URL, session ID, peer name, project directory,
-heartbeat time and the `peerPermissions` setting. It ignores entries older than
-60 seconds, and only connects to servers on your own machine (`127.0.0.1` or
-`localhost`). The registry also contains an inbox token. The office never
-reads, stores or sends it.
-
-## Troubleshooting
-
-| Symptom | Fix |
-| --- | --- |
-| "No agents yet" warning | Are the agents running with the peers plugin? Check that `ls ~/.local/share/opencode-plugin-peers/peers.d` shows `.json` files. If you changed the plugin's `storageDir`, set `OFFICE_PEERS_DIR`. |
-| The memory tab says "No memory file yet" | Check the path shown after `$ cat`. If it's wrong, adjust `OFFICE_MEMORY_PATH`. Remember that `{project}` is the folder where opencode was started. |
-| "no memory location configured" | The template points outside the allowed folders, or doesn't end in `.md`. Add the folder to `OFFICE_MEMORY_ROOTS` or fix the template. |
-| An avatar is called `build` or `plan` | That session uses a built-in opencode agent. Start it with your custom agent (e.g. `opencode --agent reviewer`, or switch agents in the TUI). |
+| `OFFICE_MEMORY_PATH` | `{repo}/.opencode/memory/{agent}.md` | Where memories live |
+| `OFFICE_PEERS_DIR` | `$XDG_DATA_HOME/opencode-plugin-peers/peers.d` | Peers registry (set it if you changed the plugin's `storageDir`) |
+| `OFFICE_DISCOVER_PEERS` | `1` | `0` turns auto-discovery off (then use `OPENCODE_URLS`) |
+| `OFFICE_REPO` | | Default `--repo` for `npm run agent` |

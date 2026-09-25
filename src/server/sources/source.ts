@@ -12,5 +12,7 @@ export interface AgentSource {
   sendMessage(agentId: string, text: string): Promise<void>;
   /** `message` is shown to the agent (opencode passes it on with a rejection). */
   replyPermission(permissionId: string, reply: PermissionReply, message?: string): Promise<void>;
+  /** Make the agent's peer name equal its opencode agent name. Returns the new name. */
+  fixPeerName?(agentId: string): Promise<string>;
   stop(): Promise<void>;
 }

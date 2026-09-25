@@ -526,3 +526,9 @@ button:disabled {
 .sim-banner:not([hidden]) + .warn-banner {
   top: 90px;
 }
+
+.term-naming {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(239, 83, 80, 0.08);
+}

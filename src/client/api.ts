@@ -24,6 +24,7 @@ export const api = {
   state: () => request<OfficeSnapshot>("GET", "/api/state"),
   log: (id: string) => request<LogEntry[]>("GET", `/api/agents/${enc(id)}/log`),
   send: (id: string, text: string) => request("POST", `/api/agents/${enc(id)}/message`, { text }),
+  fixPeerName: (id: string) => request<{ ok: true; name: string }>("POST", `/api/agents/${enc(id)}/fix-peer-name`, {}),
   memory: (id: string) => request<{ content: string; exists: boolean; file: string }>("GET", `/api/agents/${enc(id)}/memory`),
   saveMemory: (id: string, content: string) => request("PUT", `/api/agents/${enc(id)}/memory`, { content }),
   decide: (permissionId: string, decision: Decision, opts: { patterns?: string[]; message?: string } = {}) =>

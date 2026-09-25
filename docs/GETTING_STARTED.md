@@ -128,12 +128,15 @@ in *your* rules list, where you can see and revoke it.
 
 ## 7. Agent memories (optional)
 
+Memories live at `<repo>/.opencode/memory/<agent>.md`. If you already have a
+repository set up like that, follow [LINK_EXISTING_PROJECT.md](LINK_EXISTING_PROJECT.md).
+
 Add this to the `AGENTS.md` of each project, so agents keep a memory and
 behave well when you restrict them:
 
 ```md
 ## Memory
-You have a personal memory file at `<agent-office>/memory/<your-session-title-slug>.md`.
+You have a personal memory file at `.opencode/memory/<your agent name>.md` in this repository.
 Read it at the start of a task; append durable learnings at the end.
 Never store secrets or personal data about people in it.
 

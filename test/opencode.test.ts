@@ -256,3 +256,36 @@ describe("OpencodeSource peers auto-discovery", () => {
     }
   });
 });
+
+describe("OpencodeSource naming conventions", () => {
+  it("warns when a peer name differs from its agent name and can fix it with /peers-name", async () => {
+    const fake = await fakeOpencode({ ses_a: "reviewer", ses_b: "build" });
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "peers-"));
+    const now = Date.now();
+    const entry = (sessionId: string, name: string) => ({
+      version: 2, endpointId: `ep_${name}`, processId: "p", sessionId, name, directory: "/work/proj",
+      serverUrl: fake.url, timestamps: { heartbeatAt: now }, policy: { peerPermissions: "ask" },
+    });
+    await writeFile(nodePath.join(dir, "a.json"), JSON.stringify(entry("ses_a", "proj-a3f2")));
+    await writeFile(nodePath.join(dir, "b.json"), JSON.stringify(entry("ses_b", "build")));
+    const store = new OfficeStore("test");
+    const source = new OpencodeSource({ urls: [], peersDir: dir, peersPollMs: 50 });
+    try {
+      await source.start(store);
+      await until(() => store.listAgents().length === 2 && store.snapshot().warnings.some((w) => w.includes("proj-a3f2")));
+      const w = store.snapshot().warnings.join("\n");
+      expect(w).toMatch(/"proj-a3f2" runs agent "reviewer"/);
+      expect(w).toMatch(/built-in agent/);
+      expect(store.getAgent("ses_a")).toMatchObject({ agentName: "reviewer", peerName: "proj-a3f2" });
+
+      await expect(source.fixPeerName("ses_a")).resolves.toBe("reviewer");
+      const cmd = fake.requests.find((r) => r.url === "/session/ses_a/command")!;
+      expect(JSON.parse(cmd.body)).toEqual({ command: "peers-name", arguments: "reviewer" });
+    } finally {
+      await source.stop();
+      store.dispose();
+      await fake.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

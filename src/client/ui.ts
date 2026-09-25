@@ -73,6 +73,7 @@ export class TerminalWindow {
   private readonly tabs = new Map<Tab, HTMLButtonElement>();
   private readonly body = el("div", "term-body");
   private readonly banner = el("div", "term-banner");
+  private readonly naming = el("div", "term-naming");
   private readonly form = el("form", "term-input");
   private readonly input = el("input");
   private tab: Tab = "reasoning";
@@ -120,7 +121,8 @@ export class TerminalWindow {
       void this.send();
     };
 
-    this.root.append(bar, tabBar, this.banner, this.body, this.form);
+    this.naming.hidden = true;
+    this.root.append(bar, tabBar, this.naming, this.banner, this.body, this.form);
     this.root.addEventListener("pointerdown", () => this.onFocus(this));
     makeDraggable(this.root, bar);
     this.unsubscribe = logs.onEntry((e) => {
@@ -139,7 +141,35 @@ export class TerminalWindow {
     this.agent = agent;
     const status = agent.status === "needs_review" ? "waiting for you" : agent.status;
     this.titleEl.textContent = `${agent.name} - ${status}`;
+    this.titleEl.title = agent.description ?? "";
     this.root.dataset.status = agent.status;
+    this.renderNaming();
+  }
+
+  /** Peer name must equal the agent name, or other agents cannot address it by that name. */
+  private renderNaming(): void {
+    const { peerName, agentName } = this.agent;
+    const bad = !!(peerName && agentName && peerName !== agentName);
+    const key = bad ? `${peerName}->${agentName}` : "";
+    if (this.naming.dataset.key === key) return;
+    this.naming.dataset.key = key;
+    this.naming.hidden = !bad;
+    if (!bad) return this.naming.replaceChildren();
+    const status = el("span", "perm-hint");
+    const fix = el("button", "mini", `rename peer to "${agentName}"`);
+    fix.type = "button";
+    fix.onclick = async () => {
+      fix.disabled = true;
+      status.textContent = " renaming...";
+      try {
+        await api.fixPeerName(this.agent.id);
+        status.textContent = " done";
+      } catch (err) {
+        status.textContent = ` ! ${(err as Error).message}`;
+        fix.disabled = false;
+      }
+    };
+    this.naming.replaceChildren(el("span", "warn", `! peer name "${peerName}" differs from agent "${agentName}" `), fix, status);
   }
 
   setPermissions(all: PermissionRequest[]): void {
@@ -163,6 +193,9 @@ export class TerminalWindow {
     if (tab === "chat") {
       this.body.append(
         el("div", "term-line sys", "# You are talking to an AI agent. Its replies are machine-generated and may be wrong."),
+        ...(this.agent.agentName || this.agent.description
+          ? [el("div", "term-line sys", `# agent: ${this.agent.agentName ?? this.agent.name}${this.agent.description ? ` - ${this.agent.description}` : ""}`)]
+          : []),
       );
     }
     for (const e of this.logs.list(this.agent.id)) this.renderEntry(e, false);

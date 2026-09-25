@@ -18,7 +18,7 @@ Click an agent to open its in-game **terminal window**, which has three tabs:
 
 - **reasoning**: live stream of the agent's reasoning, tool calls and peer messages
 - **chat**: talk to the agent (messages are sent to its opencode session)
-- **memory**: read and edit the agent's personal `memory/<agent>.md`
+- **memory**: read and edit the agent's personal `<repo>/.opencode/memory/<agent>.md`
 
 Permission requests show up in that agent's window and in the **inbox** (the
 button in the top bar, or click the boss desk). You answer each one with one of
@@ -38,7 +38,8 @@ approvals therefore live in your editable rule list, never in opencode's own
 "always" list, which you can't edit or revoke from outside.
 
 **New here? Follow [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) step by step.**
-**Already have a project with opencode agents, peers and memory files? See [docs/LINK_EXISTING_PROJECT.md](docs/LINK_EXISTING_PROJECT.md).**
+**Already have a repository with `.opencode/agents/`, `.opencode/memory/` and the peers plugin? See [docs/LINK_EXISTING_PROJECT.md](docs/LINK_EXISTING_PROJECT.md).**
+Convention: **agent name = peer name = memory file name**. `npm run agent -- <name> --repo <repo>` starts an agent that follows it.
 
 ## Quick start
 
@@ -86,15 +87,20 @@ the three become one group.
 
 ### Agent memories
 
-Each agent's memory is a Markdown file named after the agent:
-`memory/<slug-of-agent-name>.md`. Here the slug is the name in lowercase, with
-every run of non-alphanumeric characters replaced by `-`. The office lets you
-read and edit these files. To have the agents maintain them, add something
+Each agent's memory is a Markdown file in its repository, next to its
+definition:
+
+- definition: `<repo>/.opencode/agents/<agent>.md`
+- memory: `<repo>/.opencode/memory/<agent>.md`
+
+The office lets you read and edit these files. `npm run agent` creates the
+memory file if it is missing. In simulation mode the sample memories come from
+`examples/memory/`. To have the agents maintain their memories, add something
 like this to your `AGENTS.md`:
 
 ```md
 ## Memory
-You have a personal memory file at `memory/<your-session-title-slug>.md`.
+You have a personal memory file at `.opencode/memory/<your agent name>.md`.
 Read it at the start of a task. Append durable learnings (decisions, gotchas,
 open threads) at the end of a task. Keep it short, and never store secrets or
 personal data about people in it.
@@ -109,13 +115,13 @@ personal data about people in it.
 | `OFFICE_PORT` / `OFFICE_HOST` | `4317` / `127.0.0.1` | Where the office API listens |
 | `OFFICE_TOKEN` | | If set, the API requires `?token=` or `Authorization: Bearer`. Required when `OFFICE_HOST` is not loopback |
 | `OFFICE_ALLOWED_HOSTS` | | Extra `Host` header values to accept (for example behind a reverse proxy) |
-| `OFFICE_MEMORY_DIR` | `./memory` (simulation: `./examples/memory`) | Where memory files live |
+| `OFFICE_MEMORY_DIR` | `./memory` (simulation: `./examples/memory`) | The office's own memory folder (`{office}` in templates) |
 | `OFFICE_INCLUDE_SUBAGENTS` | `0` | Show sub-agent (child) sessions as office members |
 | `OFFICE_MAX_AGENTS` | `16` | Cap on the number of sessions shown |
 | `OFFICE_SESSION_MAX_AGE_H` | `12` | Ignore sessions not updated in this many hours (at startup) |
 | `OFFICE_CONVERSATION_TTL_S` | `60` | Silence after which a conversation ends |
 | `OPENCODE_AUTHORIZATION` | | `Authorization` header value sent to opencode, if your server needs one |
-| `OFFICE_MEMORY_PATH` | `{office}/{slug}.md` | Memory file template(s), `;`-separated, e.g. `{project}/agents/{agent}/memory.md` ([details](docs/LINK_EXISTING_PROJECT.md)) |
+| `OFFICE_MEMORY_PATH` | `{repo}/.opencode/memory/{agent}.md` (simulation: `{office}/{slug}.md`) | Memory file template(s), `;`-separated ([details](docs/LINK_EXISTING_PROJECT.md)) |
 | `OFFICE_MEMORY_ROOTS` | | Extra folders memory files may live in (`;`-separated) |
 | `OFFICE_PEERS_DIR` | `$XDG_DATA_HOME/opencode-plugin-peers/peers.d` | Peers plugin registry used for auto-discovery |
 | `OFFICE_DISCOVER_PEERS` | `1` | `0` disables auto-discovery of running peers |

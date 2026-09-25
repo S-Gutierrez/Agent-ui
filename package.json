@@ -12,7 +12,8 @@
     "build": "tsc --noEmit && vite build",
     "start": "NODE_ENV=production tsx src/server/index.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "agent": "tsx scripts/agent.ts"
   },
   "engines": {
     "node": ">=20"

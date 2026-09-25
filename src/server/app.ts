@@ -105,6 +105,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, opts: Ap
       await source.sendMessage(id, text);
       return sendJson(res, 202, { ok: true });
     }
+    case "POST /agents/:id/fix-peer-name": {
+      requireAgent(store, id);
+      if (!source.fixPeerName) throw new HttpError(400, "not supported by this source");
+      const name = await source.fixPeerName(id).catch((e: Error) => {
+        throw new HttpError(400, e.message);
+      });
+      return sendJson(res, 202, { ok: true, name });
+    }
     case "GET /agents/:id/memory": {
       const agent = requireAgent(store, id);
       const mem = await memory.read(agent).catch((e: Error) => {
